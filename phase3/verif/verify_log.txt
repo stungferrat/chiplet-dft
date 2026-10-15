@@ -1,0 +1,75 @@
+# Model-checked regression (tb_core_verify), Icarus Verilog 13, 2026-10-15
+# 12 directed (D11 = unsupported instructions, D12 = x0 paths) + 300 random
+
+## LINK_LATENCY = 1
+CPU tests: 312 of 312 passed
+PASS MBIST fault_en=0 addr=  0 val=00000000 -> pass=1 fail_addr=0
+PASS MBIST fault_en=1 addr=  0 val=00000000 -> pass=0 fail_addr=0
+PASS MBIST fault_en=1 addr=  0 val=ffffffff -> pass=0 fail_addr=0
+PASS MBIST fault_en=1 addr=128 val=deadbeef -> pass=0 fail_addr=128
+PASS MBIST fault_en=1 addr=255 val=00000000 -> pass=0 fail_addr=255
+PASS MBIST fault_en=1 addr=255 val=ffffffff -> pass=0 fail_addr=255
+PASS MBIST fault_en=1 addr= 10 val=00000001 -> pass=0 fail_addr=10
+PASS functional mode restored after MBIST
+ 89838 individual value checks
+ ALL TESTS PASSED
+
+## LINK_LATENCY = 2
+CPU tests: 312 of 312 passed
+PASS MBIST fault_en=0 addr=  0 val=00000000 -> pass=1 fail_addr=0
+PASS MBIST fault_en=1 addr=  0 val=00000000 -> pass=0 fail_addr=0
+PASS MBIST fault_en=1 addr=  0 val=ffffffff -> pass=0 fail_addr=0
+PASS MBIST fault_en=1 addr=128 val=deadbeef -> pass=0 fail_addr=128
+PASS MBIST fault_en=1 addr=255 val=00000000 -> pass=0 fail_addr=255
+PASS MBIST fault_en=1 addr=255 val=ffffffff -> pass=0 fail_addr=255
+PASS MBIST fault_en=1 addr= 10 val=00000001 -> pass=0 fail_addr=10
+PASS functional mode restored after MBIST
+ 89838 individual value checks
+ ALL TESTS PASSED
+
+## LINK_LATENCY = 3
+CPU tests: 312 of 312 passed
+PASS MBIST fault_en=0 addr=  0 val=00000000 -> pass=1 fail_addr=0
+PASS MBIST fault_en=1 addr=  0 val=00000000 -> pass=0 fail_addr=0
+PASS MBIST fault_en=1 addr=  0 val=ffffffff -> pass=0 fail_addr=0
+PASS MBIST fault_en=1 addr=128 val=deadbeef -> pass=0 fail_addr=128
+PASS MBIST fault_en=1 addr=255 val=00000000 -> pass=0 fail_addr=255
+PASS MBIST fault_en=1 addr=255 val=ffffffff -> pass=0 fail_addr=255
+PASS MBIST fault_en=1 addr= 10 val=00000001 -> pass=0 fail_addr=10
+PASS functional mode restored after MBIST
+ 89838 individual value checks
+ ALL TESTS PASSED
+
+## LINK_LATENCY = 5
+CPU tests: 312 of 312 passed
+PASS MBIST fault_en=0 addr=  0 val=00000000 -> pass=1 fail_addr=0
+PASS MBIST fault_en=1 addr=  0 val=00000000 -> pass=0 fail_addr=0
+PASS MBIST fault_en=1 addr=  0 val=ffffffff -> pass=0 fail_addr=0
+PASS MBIST fault_en=1 addr=128 val=deadbeef -> pass=0 fail_addr=128
+PASS MBIST fault_en=1 addr=255 val=00000000 -> pass=0 fail_addr=255
+PASS MBIST fault_en=1 addr=255 val=ffffffff -> pass=0 fail_addr=255
+PASS MBIST fault_en=1 addr= 10 val=00000001 -> pass=0 fail_addr=10
+PASS functional mode restored after MBIST
+ 89838 individual value checks
+ ALL TESTS PASSED
+
+## Same 312 tests on the OLD decoder (before the legality check) -- must fail
+CPU tests: 128 of 312 passed
+ 184 FAILURE(S)
+
+## Fresh seed 777, 1000 random programs
+CPU tests: 1012 of 1012 passed at latency 1 and 3
+
+## mutation_check.py
+CAUGHT   forwarding: WB checked before MEM (older value wins) CPU tests: 230 of 312 passed
+CAUGHT   hazard unit never stalls (load-use ignored)          CPU tests: 61 of 312 passed
+CAUGHT   register-file write-through bypass removed           CPU tests: 31 of 312 passed
+CAUGHT   CPU ignores the link's ready (no backpressure)       CPU tests: 7 of 312 passed
+CAUGHT   forwarding ignores x0 guard                          CPU tests: 307 of 312 passed
+CAUGHT   forwarding from WB ignores x0 guard (rs1)            CPU tests: 304 of 312 passed
+CAUGHT   forwarding from MEM ignores x0 guard (rs1)           CPU tests: 305 of 312 passed
+CAUGHT   register-file bypass forwards writes to x0           CPU tests: 297 of 312 passed
+CAUGHT   decoder legality check bypassed entirely             CPU tests: 128 of 312 passed
+CAUGHT   SLTU accepted (runs as ADD)                          CPU tests: 288 of 312 passed
+CAUGHT   BLT/BGE/BLTU/BGEU accepted (run as BEQ)              CPU tests: 302 of 312 passed
+11 of 11 deliberate bugs caught

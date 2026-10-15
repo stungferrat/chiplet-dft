@@ -1,0 +1,308 @@
+# 2026-10-15: unsupported instructions -> NOP, stronger x0 tests
+# Lines starting with + were added, - were removed.
+--- before/rtl/riscv_pipeline_top.v
++++ after/rtl/riscv_pipeline_top.v
+@@ -132,10 +132,16 @@
+ 
+ // -------------------------------------------------------------
+ // Control Unit (combinational decode of opcode)
++//
++// Supported subset of RV32I (anything else executes as a NOP):
++//   R-type : ADD SUB AND OR XOR SLT SLL SRL SRA
++//   I-type : ADDI ANDI ORI XORI SLTI SLLI SRLI SRAI
++//   LW, SW, BEQ, BNE, JAL
+ // -------------------------------------------------------------
+ module control_unit (
+     input  [6:0] opcode,
+     input  [2:0] funct3,     // needed to tell BEQ (000) from BNE (001)
++    input  [6:0] funct7,     // needed to reject e.g. MUL (funct7=0000001)
+     output reg reg_write,
+     output reg mem_read,
+     output reg mem_write,
+@@ -154,8 +160,57 @@
+     localparam OP_BRANCH = 7'b1100011;
+     localparam OP_JAL    = 7'b1101111;
+ 
++    // -----------------------------------------------------------
++    // legal: 1 only for an instruction in the supported subset.
++    //
++    // WHAT THIS REPLACES: the decoder used to look at the opcode
++    // alone (plus funct3 for BEQ/BNE), so an unsupported
++    // instruction that shared an opcode with a supported one ran
++    // as that instruction:
++    //   SLTU/SLTIU -> ADD/ADDI      (funct3=011 fell to the ALU default)
++    //   BLT/BGE/BLTU/BGEU -> BEQ    (any branch funct3 other than 001)
++    //   LB/LH/LBU/LHU -> LW,  SB/SH -> SW
++    //   MUL etc. (funct7=0000001) -> the base op with the same funct3
++    // Unknown opcodes (LUI, AUIPC, JALR, FENCE, ECALL, all-zero
++    // word) were already NOPs.
++    //
++    // NOW: every field that tells supported from unsupported is
++    // checked, and an unsupported instruction is squashed to a NOP
++    // (no register write, no memory access, no branch). The core
++    // has no trap/exception logic, so a NOP is the safe, defined
++    // behaviour; it is NOT RISC-V compliant (the spec says raise
++    // an illegal-instruction exception) and the report should say
++    // so.
++    // -----------------------------------------------------------
++    reg legal;
++    always @(*) begin
++        case (opcode)
++            OP_RTYPE:
++                // funct7=0000000: ADD SLL SLT XOR SRL OR AND (not 011=SLTU)
++                // funct7=0100000: SUB (000) and SRA (101) only
++                legal = ((funct7 == 7'b0000000) && (funct3 != 3'b011)) ||
++                        ((funct7 == 7'b0100000) &&
++                         ((funct3 == 3'b000) || (funct3 == 3'b101)));
++            OP_ITYPE:
++                case (funct3)
++                    3'b011:  legal = 1'b0;                     // SLTIU
++                    3'b001:  legal = (funct7 == 7'b0000000);   // SLLI
++                    3'b101:  legal = (funct7 == 7'b0000000) ||  // SRLI
++                                     (funct7 == 7'b0100000);   // SRAI
++                    default: legal = 1'b1;  // ADDI SLTI XORI ORI ANDI:
++                                            // bits 31:25 are immediate
++                endcase
++            OP_LOAD,
++            OP_STORE:  legal = (funct3 == 3'b010);             // LW / SW only
++            OP_BRANCH: legal = (funct3 == 3'b000) ||           // BEQ
++                               (funct3 == 3'b001);             // BNE
++            OP_JAL:    legal = 1'b1;
++            default:   legal = 1'b0;
++        endcase
++    end
++
+     always @(*) begin
+-        // defaults
++        // defaults (also what an illegal instruction gets: a NOP)
+         reg_write  = 1'b0;
+         mem_read   = 1'b0;
+         mem_write  = 1'b0;
+@@ -166,7 +221,7 @@
+         jump       = 1'b0;
+         alu_op     = 2'b00;
+ 
+-        case (opcode)
++        if (legal) case (opcode)
+             OP_RTYPE: begin
+                 reg_write = 1'b1;
+                 alu_op    = 2'b10;
+@@ -195,15 +250,14 @@
+                 // used to be missing, so branch_ne was always 0 and BNE
+                 // executed as BEQ -- it branched when the operands were
+                 // EQUAL. The original tests never used BNE, so it went
+-                // unnoticed. Only BEQ/BNE are supported; other branch
+-                // funct3 values (BLT/BGE/...) still decode as BEQ.
++                // unnoticed. Only BEQ/BNE reach here (see legal).
+                 branch_ne = (funct3 == 3'b001);
+             end
+             OP_JAL: begin
+                 reg_write = 1'b1;
+                 jump      = 1'b1;
+             end
+-            default: ; // NOP / unsupported -> all zero
++            default: ; // unreachable: legal=0 for any other opcode
+         endcase
+     end
+ endmodule
+@@ -468,6 +522,7 @@
+     control_unit u_ctrl (
+         .opcode     (id_opcode),
+         .funct3     (id_funct3),
++        .funct7     (if_id_instr[31:25]),
+         .reg_write  (id_reg_write),
+         .mem_read   (id_mem_read),
+         .mem_write  (id_mem_write),
+--- before/verif/gen_tests.py
++++ after/verif/gen_tests.py
+@@ -10,6 +10,8 @@
+   R-type : ADD SUB AND OR XOR SLT SLL SRL SRA
+   I-type : ADDI ANDI ORI XORI SLTI SLLI SRLI SRAI
+   LW, SW, BEQ, BNE, JAL
++Every other instruction word executes as a NOP (no register write, no
++memory access, PC + 4), in the model and in the RTL.
+ Memory model: word-addressed 256 x 32 SRAM indexed by addr[9:2] (byte
+ address bits 1:0 ignored, addresses above 1023 alias) -- this is how the
+ system is built, so the model does the same.
+@@ -86,6 +88,29 @@
+ 
+ HALT = jal(0, 0)
+ 
++# Unsupported RV32I instructions (and a few non-RV32I words). The core
++# must execute every one of these as a NOP.
++def sltu(rd, a, b):   return r_type(0x00, b, a, 3, rd)
++def mul(rd, a, b):    return r_type(0x01, b, a, 0, rd)      # RV32M, not RV32I
++def sltiu(rd, a, imm): return i_type(imm, a, 3, rd)
++def lb(rd, base, imm):  return i_type(imm, base, 0, rd, op=0x03)
++def lh(rd, base, imm):  return i_type(imm, base, 1, rd, op=0x03)
++def lbu(rd, base, imm): return i_type(imm, base, 4, rd, op=0x03)
++def lhu(rd, base, imm): return i_type(imm, base, 5, rd, op=0x03)
++def sb(src, base, imm): return sw(src, base, imm) & ~(7 << 12)              # funct3 000
++def sh(src, base, imm): return (sw(src, base, imm) & ~(7 << 12)) | (1 << 12)  # funct3 001
++def blt(a, b, off):  return _b(4, a, b, off)
++def bge(a, b, off):  return _b(5, a, b, off)
++def bltu(a, b, off): return _b(6, a, b, off)
++def bgeu(a, b, off): return _b(7, a, b, off)
++def lui(rd, imm20):   return ((imm20 & 0xFFFFF) << 12) | (rd << 7) | 0x37
++def auipc(rd, imm20): return ((imm20 & 0xFFFFF) << 12) | (rd << 7) | 0x17
++def jalr(rd, base, imm): return i_type(imm, base, 0, rd, op=0x67)
++FENCE, ECALL, EBREAK = 0x0000000F, 0x00000073, 0x00100073
++
++assert sltu(3, 1, 2) == 0x0020B1B3 and lui(5, 0x12345) == 0x123452B7
++assert jalr(1, 2, 8) == 0x008100E7 and blt(1, 2, 8) == 0x0020C463
++
+ # Encoder self-check against the hand-assembled words used in the
+ # original testbench (tb_chiplet_soc.v).
+ assert addi(2, 0, 0)      == 0x00000113
+@@ -129,6 +154,16 @@
+                 raise RuntimeError("program did not reach HALT")
+ 
+     def step(self, w):
++        # Anything outside the supported subset is a NOP: no register
++        # write, no memory access, PC + 4. Every "raise Unsupported" in
++        # _exec happens before any state is changed, so catching it here
++        # gives exactly that behaviour.
++        try:
++            self._exec(w)
++        except Unsupported:
++            self.pc = (self.pc + 4) & MASK
++
++    def _exec(self, w):
+         r = self.regs
+         op = w & 0x7F
+         rd = (w >> 7) & 31
+@@ -366,6 +401,70 @@
+     assert t.reg(4) == 13 and t.reg(6) == 5 and t.reg(3) == 0
+     T.append(t)
+ 
++    # D11: unsupported instructions must be NOPs. Each one targets a
++    # register (or memory word) of its own, so ANY write shows up as a
++    # mismatch. x25 counts the "must execute" instructions placed right
++    # after anything that could jump, so a wrongly taken branch or
++    # JALR shows up too. Operand values are chosen so that running the
++    # instruction as its old misdecode (SLTU->ADD, BLT->BEQ, ...) OR as
++    # the real RV32I instruction both give a visible wrong answer.
++    mem = [0] * 256
++    mem[64], mem[65], mem[66] = 0x11111111, 0x22222222, 0x33333333
++    t = Test("D11 unsupported instructions are NOPs", [
++        addi(1, 0, 5), addi(2, 0, -3), addi(9, 0, 256),   # x9 = word 64
++        sltu(3, 1, 2), sltiu(4, 1, -1), mul(5, 1, 2),
++        r_type(0x20, 2, 1, 1, 6),       # SLL with funct7=0100000
++        r_type(0x20, 2, 1, 7, 7),       # AND with funct7=0100000
++        i_type((0x20 << 5) | 3, 1, 1, 8),   # SLLI with funct7=0100000
++        i_type((0x10 << 5) | 3, 1, 5, 10),  # SRLI with funct7=0010000
++        blt(2, 1, 8),  addi(25, 25, 1),     # real BLT: taken; as BEQ: not taken
++        bge(1, 1, 8),  addi(25, 25, 1),     # real BGE: taken; as BEQ: taken
++        bltu(1, 2, 8), addi(25, 25, 1),
++        bgeu(1, 1, 8), addi(25, 25, 1),
++        jalr(17, 0, 8), addi(25, 25, 1),    # would jump to 8 and link x17
++        lb(11, 9, 0), lh(12, 9, 0), lbu(13, 9, 0), lhu(14, 9, 0),
++        sb(1, 9, 4), sh(1, 9, 8),           # would overwrite words 65, 66
++        lui(15, 0x12345), auipc(16, 1),
++        FENCE, ECALL, EBREAK, 0x00000000, 0xFFFFFFFF,
++        lw(18, 9, 0), sltu(19, 18, 18),     # illegal right after a load whose
++        add(21, 18, 0),                     #   rd matches its rs (stall check)
++        addi(22, 0, 7), mul(23, 22, 22),    # illegal between producer and
++        add(24, 22, 22),                    #   consumer: forwarding unaffected
++    ], mem)
++    for r in (3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 19, 23):
++        assert t.reg(r) == 0, r
++    assert t.reg(25) == 5 and t.reg(21) == 0x11111111 and t.reg(24) == 14
++    assert t.iss.mem[65] == 0x22222222 and t.iss.mem[66] == 0x33333333
++    T.append(t)
++
++    # D12: x0 on every path. A write to x0 must never be visible, whether
++    # the reader gets its operand from the MEM stage (distance 1), the WB
++    # stage (2), the register-file write-through bypass (3), or a load.
++    # Also x0 as store data, as a load base address and in a branch.
++    # x20 writes are spacers; they do not touch x0.
++    mem = [0] * 256
++    mem[0], mem[1] = 0xAAAAAAAA, 0x55
++    t = Test("D12 writes to x0 on every forwarding path", [
++        addi(0, 0, 11), add(1, 0, 0),                                  # MEM path
++        addi(0, 0, 12), addi(20, 0, 0), add(2, 0, 0),                  # WB path
++        addi(0, 0, 13), addi(20, 0, 0), addi(20, 0, 0), add(3, 0, 0),  # RF bypass
++        lw(0, 0, 0), add(4, 0, 0),                                     # load, dist 1
++        lw(0, 0, 0), addi(20, 0, 0), add(5, 0, 0),                     # load, dist 2
++        lw(0, 0, 0), addi(20, 0, 0), addi(20, 0, 0), add(6, 0, 0),     # load, dist 3
++        addi(0, 0, 5), sw(0, 0, 8),            # store data = x0 -> word 2 stays 0
++        addi(0, 0, 40), lw(7, 0, 4),           # base x0 -> word 1 (0x55), not word 11
++        addi(0, 0, 1), beq(0, 0, 8), addi(8, 0, 1),     # x0 == x0 still: taken
++        addi(0, 0, 1), bne(0, 0, 8), addi(9, 0, 1),     # not taken: executes
++        jal(0, 8), addi(10, 0, 1), add(11, 0, 0),       # JAL x0 links nothing
++        addi(12, 0, 3), sub(0, 12, 0), add(13, 12, 0),  # x0 as rs2 right after
++        lw(0, 0, 0), sw(0, 0, 12),             # loaded "x0" as store data
++    ], mem)
++    for r in (1, 2, 3, 4, 5, 6, 8, 10, 11):
++        assert t.reg(r) == 0, r
++    assert t.reg(7) == 0x55 and t.reg(9) == 1 and t.reg(13) == 3
++    assert t.iss.mem[2] == 0 and t.iss.mem[3] == 0
++    T.append(t)
++
+     return T
+ 
+ 
+@@ -385,14 +484,34 @@
+             return rng.choice(recent[-3:])
+         return rng.choice(regs + [0])
+ 
++    # x0 is a destination ~8% of the time (was 3%: too rare -- a
++    # planted x0-forwarding bug was caught by only 2 of 310 tests)
+     def dst():
+-        return rng.choice(regs + ([0] if rng.random() < 0.03 else []))
++        return rng.choice(regs + ([0] if rng.random() < 0.08 else []))
++
++    # unsupported instructions, random operands; all must act as NOPs
++    illegal = [
++        lambda: sltu(rng.choice(regs), src(), src()),
++        lambda: mul(rng.choice(regs), src(), src()),
++        lambda: sltiu(rng.choice(regs), src(), rng.randint(-2048, 2047)),
++        lambda: lb(rng.choice(regs), src(), rng.randint(-2048, 2047)),
++        lambda: lhu(rng.choice(regs), src(), rng.randint(-2048, 2047)),
++        lambda: sb(src(), src(), rng.randint(-2048, 2047)),
++        lambda: sh(src(), src(), rng.randint(-2048, 2047)),
++        lambda: rng.choice([blt, bge, bltu, bgeu])(src(), src(), 8),
++        lambda: jalr(rng.choice(regs), src(), rng.randint(-2048, 2047)),
++        lambda: lui(rng.choice(regs), rng.getrandbits(20)),
++        lambda: auipc(rng.choice(regs), rng.getrandbits(20)),
++    ]
+ 
+     while len(body) < 15 + n:
+         remaining = (15 + n) - len(body)
+         kind = rng.choices(
+-            ["r", "i", "sh", "lw", "sw", "br", "jal"],
+-            weights=[28, 18, 8, 15, 12, 13, 6])[0]
++            ["r", "i", "sh", "lw", "sw", "br", "jal", "ill"],
++            weights=[28, 18, 8, 15, 12, 13, 6, 3])[0]
++        if kind == "ill":
++            body.append(rng.choice(illegal)())
++            continue
+         if kind == "r":
+             f = rng.choice([add, sub, and_, or_, xor, slt, sll, srl, sra])
+             d = dst(); body.append(f(d, src(), src())); recent.append(d)
+--- before/verif/mutation_check.py
++++ after/verif/mutation_check.py
+@@ -26,6 +26,23 @@
+     ("forwarding ignores x0 guard", "riscv_pipeline_top.v",
+      "        if (mem_reg_write && (mem_rd != 5'd0) && (mem_rd == ex_rs2))",
+      "        if (mem_reg_write && (mem_rd == ex_rs2))", 1),
++    # --- added with the illegal-instruction / x0 hardening ---
++    ("forwarding from WB ignores x0 guard (rs1)", "riscv_pipeline_top.v",
++     "        else if (wb_reg_write && (wb_rd != 5'd0) && (wb_rd == ex_rs1))",
++     "        else if (wb_reg_write && (wb_rd == ex_rs1))", 1),
++    ("forwarding from MEM ignores x0 guard (rs1)", "riscv_pipeline_top.v",
++     "        if (mem_reg_write && (mem_rd != 5'd0) && (mem_rd == ex_rs1))\n            fwd_a = 2'b01;\n        else if (wb_reg_write",
++     "        if (mem_reg_write && (mem_rd == ex_rs1))\n            fwd_a = 2'b01;\n        else if (wb_reg_write", 1),
++    ("register-file bypass forwards writes to x0", "riscv_pipeline_top.v",
++     "    assign rd1 = (ra1 == 5'd0) ? 32'd0 :\n                 (we",
++     "    assign rd1 = (we", 1),
++    ("decoder legality check bypassed entirely", "riscv_pipeline_top.v",
++     "        if (legal) case (opcode)", "        if (1'b1) case (opcode)", 1),
++    ("SLTU accepted (runs as ADD)", "riscv_pipeline_top.v",
++     "legal = ((funct7 == 7'b0000000) && (funct3 != 3'b011)) ||",
++     "legal = ((funct7 == 7'b0000000)) ||", 1),
++    ("BLT/BGE/BLTU/BGEU accepted (run as BEQ)", "riscv_pipeline_top.v",
++     "OP_BRANCH: legal = (funct3 == 3'b000) ||", "OP_BRANCH: legal = 1'b1 ||", 1),
+ ]
+ 
+ 

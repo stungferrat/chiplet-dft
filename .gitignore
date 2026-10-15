@@ -1,0 +1,37 @@
+# Simulation outputs (Icarus / Xcelium)
+*.out
+*.vcd
+*.fsdb
+*.shm/
+xcelium.d/
+INCA_libs/
+cov_work/
+waves.shm/
+*.history
+*.key
+.simvision/
+xrun.log
+verify_lat*.log
+verify_cov.log
+run_lat*.log
+run_cov.log
+
+# Synthesis outputs (Genus) -- regenerate, don't commit
+phase3/syn/reports/
+phase3/syn/outputs/
+genus*.log*
+genus*.cmd*
+fv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Packaging -- git history replaces the phase3_vN.zip snapshots
+*.zip
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/

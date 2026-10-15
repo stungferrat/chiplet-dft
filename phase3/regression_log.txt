@@ -1,0 +1,124 @@
+################ LINK_LATENCY = 1 ################
+=========================================
+ Link latency under test: 1 cycle(s)
+=========================================
+      [T1] cycles=119  mem_wait=1  hazard_stall=1
+PASS [T1 load value]: x1 = 42 as expected
+PASS [T1 load-use ADD]: x3 = 47 as expected
+      [T2] cycles=119  mem_wait=2  hazard_stall=0
+PASS [T2 first load]: x1 = 100 as expected
+PASS [T2 second load]: x3 = 200 as expected
+      [T3] cycles=119  mem_wait=1  hazard_stall=1
+PASS [T3 load value]: x1 = 42 as expected
+PASS [T3 branch-on-loaded-value taken correctly]: x6 = 99 as expected
+      [T4] cycles=119  mem_wait=3  hazard_stall=0
+PASS [T4 initial load (pre-store value)]: x1 = 55 as expected
+PASS [T4 store to same address]: sram[0] = 123 as expected
+PASS [T4 reload sees updated value]: x3 = 123 as expected
+      [T5] cycles=119  mem_wait=0  hazard_stall=0
+PASS [T5 ADDI negative immediate]: x2 = 4294967040 as expected
+PASS [T5 SRAI sign-extends]: x3 = 4294967280 as expected
+      [T6] cycles=119  mem_wait=0  hazard_stall=0
+PASS [T6 pre-jump sanity]: x1 = 11 as expected
+PASS [T6 JAL link address]: x5 = 8 as expected
+PASS [T6 JAL target reached, skips not taken]: x2 = 7 as expected
+PASS [T7 MBIST clean pass (no fault injected)]: bist_pass = 1
+PASS [T8 MBIST detects injected stuck-at fault]: bist_pass = 0 (fail_addr matched)
+=========================================
+ALL TESTS PASSED
+=========================================
+phase3/tb/tb_chiplet_soc.v:543: $finish called at 130375000 (1ps)
+
+################ LINK_LATENCY = 2 ################
+=========================================
+ Link latency under test: 2 cycle(s)
+=========================================
+      [T1] cycles=119  mem_wait=2  hazard_stall=1
+PASS [T1 load value]: x1 = 42 as expected
+PASS [T1 load-use ADD]: x3 = 47 as expected
+      [T2] cycles=119  mem_wait=4  hazard_stall=0
+PASS [T2 first load]: x1 = 100 as expected
+PASS [T2 second load]: x3 = 200 as expected
+      [T3] cycles=119  mem_wait=2  hazard_stall=1
+PASS [T3 load value]: x1 = 42 as expected
+PASS [T3 branch-on-loaded-value taken correctly]: x6 = 99 as expected
+      [T4] cycles=119  mem_wait=6  hazard_stall=0
+PASS [T4 initial load (pre-store value)]: x1 = 55 as expected
+PASS [T4 store to same address]: sram[0] = 123 as expected
+PASS [T4 reload sees updated value]: x3 = 123 as expected
+      [T5] cycles=119  mem_wait=0  hazard_stall=0
+PASS [T5 ADDI negative immediate]: x2 = 4294967040 as expected
+PASS [T5 SRAI sign-extends]: x3 = 4294967280 as expected
+      [T6] cycles=119  mem_wait=0  hazard_stall=0
+PASS [T6 pre-jump sanity]: x1 = 11 as expected
+PASS [T6 JAL link address]: x5 = 8 as expected
+PASS [T6 JAL target reached, skips not taken]: x2 = 7 as expected
+PASS [T7 MBIST clean pass (no fault injected)]: bist_pass = 1
+PASS [T8 MBIST detects injected stuck-at fault]: bist_pass = 0 (fail_addr matched)
+=========================================
+ALL TESTS PASSED
+=========================================
+phase3/tb/tb_chiplet_soc.v:543: $finish called at 130375000 (1ps)
+
+################ LINK_LATENCY = 3 ################
+=========================================
+ Link latency under test: 3 cycle(s)
+=========================================
+      [T1] cycles=119  mem_wait=3  hazard_stall=1
+PASS [T1 load value]: x1 = 42 as expected
+PASS [T1 load-use ADD]: x3 = 47 as expected
+      [T2] cycles=119  mem_wait=6  hazard_stall=0
+PASS [T2 first load]: x1 = 100 as expected
+PASS [T2 second load]: x3 = 200 as expected
+      [T3] cycles=119  mem_wait=3  hazard_stall=1
+PASS [T3 load value]: x1 = 42 as expected
+PASS [T3 branch-on-loaded-value taken correctly]: x6 = 99 as expected
+      [T4] cycles=119  mem_wait=9  hazard_stall=0
+PASS [T4 initial load (pre-store value)]: x1 = 55 as expected
+PASS [T4 store to same address]: sram[0] = 123 as expected
+PASS [T4 reload sees updated value]: x3 = 123 as expected
+      [T5] cycles=119  mem_wait=0  hazard_stall=0
+PASS [T5 ADDI negative immediate]: x2 = 4294967040 as expected
+PASS [T5 SRAI sign-extends]: x3 = 4294967280 as expected
+      [T6] cycles=119  mem_wait=0  hazard_stall=0
+PASS [T6 pre-jump sanity]: x1 = 11 as expected
+PASS [T6 JAL link address]: x5 = 8 as expected
+PASS [T6 JAL target reached, skips not taken]: x2 = 7 as expected
+PASS [T7 MBIST clean pass (no fault injected)]: bist_pass = 1
+PASS [T8 MBIST detects injected stuck-at fault]: bist_pass = 0 (fail_addr matched)
+=========================================
+ALL TESTS PASSED
+=========================================
+phase3/tb/tb_chiplet_soc.v:543: $finish called at 130375000 (1ps)
+
+################ LINK_LATENCY = 5 ################
+=========================================
+ Link latency under test: 5 cycle(s)
+=========================================
+      [T1] cycles=119  mem_wait=5  hazard_stall=1
+PASS [T1 load value]: x1 = 42 as expected
+PASS [T1 load-use ADD]: x3 = 47 as expected
+      [T2] cycles=119  mem_wait=10  hazard_stall=0
+PASS [T2 first load]: x1 = 100 as expected
+PASS [T2 second load]: x3 = 200 as expected
+      [T3] cycles=119  mem_wait=5  hazard_stall=1
+PASS [T3 load value]: x1 = 42 as expected
+PASS [T3 branch-on-loaded-value taken correctly]: x6 = 99 as expected
+      [T4] cycles=119  mem_wait=15  hazard_stall=0
+PASS [T4 initial load (pre-store value)]: x1 = 55 as expected
+PASS [T4 store to same address]: sram[0] = 123 as expected
+PASS [T4 reload sees updated value]: x3 = 123 as expected
+      [T5] cycles=119  mem_wait=0  hazard_stall=0
+PASS [T5 ADDI negative immediate]: x2 = 4294967040 as expected
+PASS [T5 SRAI sign-extends]: x3 = 4294967280 as expected
+      [T6] cycles=119  mem_wait=0  hazard_stall=0
+PASS [T6 pre-jump sanity]: x1 = 11 as expected
+PASS [T6 JAL link address]: x5 = 8 as expected
+PASS [T6 JAL target reached, skips not taken]: x2 = 7 as expected
+PASS [T7 MBIST clean pass (no fault injected)]: bist_pass = 1
+PASS [T8 MBIST detects injected stuck-at fault]: bist_pass = 0 (fail_addr matched)
+=========================================
+ALL TESTS PASSED
+=========================================
+phase3/tb/tb_chiplet_soc.v:543: $finish called at 130375000 (1ps)
+

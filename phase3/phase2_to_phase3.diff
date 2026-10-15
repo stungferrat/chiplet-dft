@@ -1,0 +1,366 @@
+# Phase 2 -> Phase 3 RTL changes (synthesis-readiness fixes, BNE fix, illegal-instruction NOPs)
+
+diff -u ../phase2/rtl/chiplet_interconnect.v rtl/chiplet_interconnect.v
+--- ../phase2/rtl/chiplet_interconnect.v	2026-10-10 11:40:32.488797900 +0530
++++ rtl/chiplet_interconnect.v	2026-10-13 01:47:24.000000000 +0530
+@@ -1,8 +1,8 @@
+ // =============================================================
+ // chiplet_interconnect.v
+ // UCIe-inspired die-to-die link: mainband transaction engine + sideband.
+-// Phase 2: the interconnect carries a real req/ready handshake.
+-// See ../WALKTHROUGH.md for the full explanation.
++// Phase 3: synthesis-ready -- instr_mem has a real load port, and the
++// fault-injection ports exist only when compiled with -DSIM.
+ // =============================================================
+ `timescale 1ns/1ps
+ 
+diff -u ../phase2/rtl/chiplet_soc_top.v rtl/chiplet_soc_top.v
+--- ../phase2/rtl/chiplet_soc_top.v	2026-10-10 11:40:32.488797900 +0530
++++ rtl/chiplet_soc_top.v	2026-10-13 01:47:24.000000000 +0530
+@@ -1,8 +1,8 @@
+ // =============================================================
+ // chiplet_soc_top.v
+ // Top level: instantiates both chiplets and the interconnect between them.
+-// Phase 2: the interconnect carries a real req/ready handshake.
+-// See ../WALKTHROUGH.md for the full explanation.
++// Phase 3: synthesis-ready -- instr_mem has a real load port, and the
++// fault-injection ports exist only when compiled with -DSIM.
+ // =============================================================
+ `timescale 1ns/1ps
+ 
+@@ -23,10 +23,17 @@
+     output        bist_done,
+     output        bist_pass,
+     output [7:0]  bist_fail_addr,
+-    // ---- Verification-only fault injection (tie off for synthesis) ----
++    // ---- Chiplet-1 program load (write instr_mem while in reset) ----
++    input         imem_we,
++    input  [7:0]  imem_waddr,
++    input  [31:0] imem_wdata
++`ifdef SIM
++    ,
++    // ---- Verification-only fault injection (simulation builds only) ----
+     input         fault_en,
+     input  [7:0]  fault_addr,
+     input  [31:0] fault_val
++`endif
+ );
+     // -----------------------------------------------------------
+     // Chiplet-1 : RV32I core
+@@ -45,7 +52,10 @@
+         .mem_wdata    (c1_mem_wdata),
+         .mem_rdata_in (c1_mem_rdata),
+         .mem_req      (c1_mem_req),
+-        .mem_ready    (c1_mem_ready)
++        .mem_ready    (c1_mem_ready),
++        .imem_we      (imem_we),
++        .imem_waddr   (imem_waddr),
++        .imem_wdata   (imem_wdata)
+     );
+     // -----------------------------------------------------------
+     // UCIe-inspired interconnect (mainband + sideband)
+@@ -112,9 +122,11 @@
+         .bist_busy      (c2_bist_busy),
+         .bist_done      (c2_bist_done),
+         .bist_pass      (c2_bist_pass),
+-        .bist_fail_addr (c2_bist_fail_addr),
+-        .fault_en       (fault_en),
++        .bist_fail_addr (c2_bist_fail_addr)
++`ifdef SIM
++       ,.fault_en       (fault_en),
+         .fault_addr     (fault_addr),
+         .fault_val      (fault_val)
++`endif
+     );
+ endmodule
+diff -u ../phase2/rtl/mem_io_chiplet.v rtl/mem_io_chiplet.v
+--- ../phase2/rtl/mem_io_chiplet.v	2026-10-10 11:40:32.488797900 +0530
++++ rtl/mem_io_chiplet.v	2026-10-13 01:47:24.000000000 +0530
+@@ -1,8 +1,8 @@
+ // =============================================================
+ // mem_io_chiplet.v
+ // Chiplet-2: SRAM array, March C- MBIST engine, and the arbitration wrapper.
+-// Phase 2: the interconnect carries a real req/ready handshake.
+-// See ../WALKTHROUGH.md for the full explanation.
++// Phase 3: synthesis-ready -- instr_mem has a real load port, and the
++// fault-injection ports exist only when compiled with -DSIM.
+ // =============================================================
+ `timescale 1ns/1ps
+ 
+@@ -16,12 +16,17 @@
+     input         we,
+     input  [7:0]  addr,
+     input  [31:0] din,
+-    output reg [31:0] dout,
+-
+-    // --- Verification-only fault injection (tie fault_en=0 for synthesis) ---
++    output reg [31:0] dout
++`ifdef SIM
++    ,
++    // --- Verification-only stuck-at fault injection ---
++    // Exists only when compiled with -DSIM, so synthesis never builds
++    // these muxes into the SRAM path. In the netlist, faults come from
++    // the ATPG tool's fault models instead.
+     input         fault_en,
+     input  [7:0]  fault_addr,
+     input  [31:0] fault_val
++`endif
+ );
+     reg [31:0] mem [0:255];
+     integer i;
+@@ -30,12 +35,20 @@
+             mem[i] = 32'd0;
+     end
+ 
++`ifdef SIM
++    wire fault_hit = fault_en && (addr == fault_addr);
++`else
++    wire fault_hit = 1'b0;
++`endif
++
+     always @(posedge clk) begin
+-        if (we && !(fault_en && (addr == fault_addr)))
+-            mem[addr] <= din; // stuck cell ignores writes when faulted
+-        if (fault_en && (addr == fault_addr))
+-            dout <= fault_val; // stuck-at value regardless of stored content
++        if (we && !fault_hit)
++            mem[addr] <= din;        // stuck cell ignores writes when faulted
++`ifdef SIM
++        if (fault_hit)
++            dout <= fault_val;       // stuck-at value regardless of contents
+         else
++`endif
+             dout <= mem[addr];
+     end
+ endmodule
+@@ -308,12 +321,14 @@
+     output        bist_busy,
+     output        bist_done,
+     output        bist_pass,
+-    output [7:0]  bist_fail_addr,
+-
+-    // Verification-only fault injection (tie fault_en=0 for synthesis)
++    output [7:0]  bist_fail_addr
++`ifdef SIM
++    ,
++    // Verification-only fault injection (simulation builds only)
+     input         fault_en,
+     input  [7:0]  fault_addr,
+     input  [31:0] fault_val
++`endif
+ );
+     wire        bist_we;
+     wire [7:0]  bist_addr;
+@@ -329,10 +344,12 @@
+         .we         (arr_we),
+         .addr       (arr_addr),
+         .din        (arr_din),
+-        .dout       (array_dout),
+-        .fault_en   (fault_en),
++        .dout       (array_dout)
++`ifdef SIM
++       ,.fault_en   (fault_en),
+         .fault_addr (fault_addr),
+         .fault_val  (fault_val)
++`endif
+     );
+ 
+     march_c_minus_bist u_bist (
+diff -u ../phase2/rtl/riscv_pipeline_top.v rtl/riscv_pipeline_top.v
+--- ../phase2/rtl/riscv_pipeline_top.v	2026-10-10 11:40:32.488797900 +0530
++++ rtl/riscv_pipeline_top.v	2026-10-15 23:31:06.864680900 +0530
+@@ -1,8 +1,8 @@
+ // =============================================================
+ // riscv_pipeline_top.v
+ // Chiplet-1: RV32I 5-stage pipeline core and its submodules.
+-// Phase 2: the interconnect carries a real req/ready handshake.
+-// See ../WALKTHROUGH.md for the full explanation.
++// Phase 3: synthesis-ready -- instr_mem has a real load port, and the
++// fault-injection ports exist only when compiled with -DSIM.
+ // =============================================================
+ `timescale 1ns/1ps
+ 
+@@ -88,20 +88,38 @@
+ // Instruction Memory (simple ROM, word addressed)
+ // -------------------------------------------------------------
+ module instr_mem (
+-    input  [31:0] addr,
++    input         clk,
++    // Program-load write port. Without it, nothing in the hardware ever
++    // writes this memory: the old version was filled only by an initial
++    // block (ignored by synthesis) and by the testbench reaching in
++    // hierarchically (impossible in silicon). Synthesis then saw the
++    // instructions as constant and optimized most of the core away.
++    input         we,
++    input  [7:0]  waddr,     // word address
++    input  [31:0] wdata,
++    // Fetch port
++    input  [31:0] addr,      // byte address from the PC
+     output [31:0] instr
+ );
+     reg [31:0] mem [0:255];
+-    integer j;
+ 
++    always @(posedge clk) begin
++        if (we)
++            mem[waddr] <= wdata;
++    end
++
++    assign instr = mem[addr[9:2]];
++
++    // Simulation convenience only: start as NOPs (ADDI x0,x0,0) so an
++    // unloaded location doesn't fetch X. Real hardware must be loaded
++    // through the write port before reset is released.
++    // synthesis translate_off
++    integer j;
+     initial begin
+-        // Default: fill with NOPs (ADDI x0,x0,0)
+         for (j = 0; j < 256; j = j + 1)
+             mem[j] = 32'h00000013;
+-        // Test program can be loaded via $readmemh from testbench
+     end
+-
+-    assign instr = mem[addr[9:2]];
++    // synthesis translate_on
+ endmodule
+ 
+ 
+@@ -114,9 +132,16 @@
+ 
+ // -------------------------------------------------------------
+ // Control Unit (combinational decode of opcode)
++//
++// Supported subset of RV32I (anything else executes as a NOP):
++//   R-type : ADD SUB AND OR XOR SLT SLL SRL SRA
++//   I-type : ADDI ANDI ORI XORI SLTI SLLI SRLI SRAI
++//   LW, SW, BEQ, BNE, JAL
+ // -------------------------------------------------------------
+ module control_unit (
+     input  [6:0] opcode,
++    input  [2:0] funct3,     // needed to tell BEQ (000) from BNE (001)
++    input  [6:0] funct7,     // needed to reject e.g. MUL (funct7=0000001)
+     output reg reg_write,
+     output reg mem_read,
+     output reg mem_write,
+@@ -135,8 +160,57 @@
+     localparam OP_BRANCH = 7'b1100011;
+     localparam OP_JAL    = 7'b1101111;
+ 
++    // -----------------------------------------------------------
++    // legal: 1 only for an instruction in the supported subset.
++    //
++    // WHAT THIS REPLACES: the decoder used to look at the opcode
++    // alone (plus funct3 for BEQ/BNE), so an unsupported
++    // instruction that shared an opcode with a supported one ran
++    // as that instruction:
++    //   SLTU/SLTIU -> ADD/ADDI      (funct3=011 fell to the ALU default)
++    //   BLT/BGE/BLTU/BGEU -> BEQ    (any branch funct3 other than 001)
++    //   LB/LH/LBU/LHU -> LW,  SB/SH -> SW
++    //   MUL etc. (funct7=0000001) -> the base op with the same funct3
++    // Unknown opcodes (LUI, AUIPC, JALR, FENCE, ECALL, all-zero
++    // word) were already NOPs.
++    //
++    // NOW: every field that tells supported from unsupported is
++    // checked, and an unsupported instruction is squashed to a NOP
++    // (no register write, no memory access, no branch). The core
++    // has no trap/exception logic, so a NOP is the safe, defined
++    // behaviour; it is NOT RISC-V compliant (the spec says raise
++    // an illegal-instruction exception) and the report should say
++    // so.
++    // -----------------------------------------------------------
++    reg legal;
++    always @(*) begin
++        case (opcode)
++            OP_RTYPE:
++                // funct7=0000000: ADD SLL SLT XOR SRL OR AND (not 011=SLTU)
++                // funct7=0100000: SUB (000) and SRA (101) only
++                legal = ((funct7 == 7'b0000000) && (funct3 != 3'b011)) ||
++                        ((funct7 == 7'b0100000) &&
++                         ((funct3 == 3'b000) || (funct3 == 3'b101)));
++            OP_ITYPE:
++                case (funct3)
++                    3'b011:  legal = 1'b0;                     // SLTIU
++                    3'b001:  legal = (funct7 == 7'b0000000);   // SLLI
++                    3'b101:  legal = (funct7 == 7'b0000000) ||  // SRLI
++                                     (funct7 == 7'b0100000);   // SRAI
++                    default: legal = 1'b1;  // ADDI SLTI XORI ORI ANDI:
++                                            // bits 31:25 are immediate
++                endcase
++            OP_LOAD,
++            OP_STORE:  legal = (funct3 == 3'b010);             // LW / SW only
++            OP_BRANCH: legal = (funct3 == 3'b000) ||           // BEQ
++                               (funct3 == 3'b001);             // BNE
++            OP_JAL:    legal = 1'b1;
++            default:   legal = 1'b0;
++        endcase
++    end
++
+     always @(*) begin
+-        // defaults
++        // defaults (also what an illegal instruction gets: a NOP)
+         reg_write  = 1'b0;
+         mem_read   = 1'b0;
+         mem_write  = 1'b0;
+@@ -147,7 +221,7 @@
+         jump       = 1'b0;
+         alu_op     = 2'b00;
+ 
+-        case (opcode)
++        if (legal) case (opcode)
+             OP_RTYPE: begin
+                 reg_write = 1'b1;
+                 alu_op    = 2'b10;
+@@ -172,12 +246,18 @@
+             OP_BRANCH: begin
+                 branch = 1'b1;
+                 alu_op = 2'b01;
++                // BUG FIX (found by the model-checked regression): this
++                // used to be missing, so branch_ne was always 0 and BNE
++                // executed as BEQ -- it branched when the operands were
++                // EQUAL. The original tests never used BNE, so it went
++                // unnoticed. Only BEQ/BNE reach here (see legal).
++                branch_ne = (funct3 == 3'b001);
+             end
+             OP_JAL: begin
+                 reg_write = 1'b1;
+                 jump      = 1'b1;
+             end
+-            default: ; // NOP / unsupported -> all zero
++            default: ; // unreachable: legal=0 for any other opcode
+         endcase
+     end
+ endmodule
+@@ -314,6 +394,13 @@
+     output [31:0] mem_wdata,
+     input  [31:0] mem_rdata_in,
+ 
++    // ---- Phase 3: instruction-memory load port ----
++    // Loads a program into instr_mem. Intended to be used while the
++    // core is held in reset; see instr_mem for why this port exists.
++    input         imem_we,
++    input  [7:0]  imem_waddr,
++    input  [31:0] imem_wdata,
++
+     // ---- Phase 2: real link handshake ----
+     // mem_req   : "I have a memory transaction outstanding."
+     //             Held high, with addr/we/wdata stable, until the
+@@ -379,6 +466,10 @@
+     assign pc_write = ~stall & ~mem_wait;
+ 
+     instr_mem u_imem (
++        .clk   (clk),
++        .we    (imem_we),
++        .waddr (imem_waddr),
++        .wdata (imem_wdata),
+         .addr  (pc),
+         .instr (if_instr)
+     );
+@@ -430,6 +521,8 @@
+ 
+     control_unit u_ctrl (
+         .opcode     (id_opcode),
++        .funct3     (id_funct3),
++        .funct7     (if_id_instr[31:25]),
+         .reg_write  (id_reg_write),
+         .mem_read   (id_mem_read),
+         .mem_write  (id_mem_write),

@@ -1,0 +1,7 @@
+# Store and check out text files with LF endings, so the Linux lab machines
+# get clean scripts (no more stripping \r after copying from Windows).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
